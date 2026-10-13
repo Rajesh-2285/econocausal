@@ -108,6 +108,13 @@ export default function App() {
 
         {uploadMessage && <div className="notice success"><Database size={17} /><div><strong>{uploadMessage}</strong><span>CSV is loaded in this browser for preview.</span></div><button onClick={() => {setRows([]);setColumns([]);setFileName('');setUploadMessage('')}} aria-label="Clear dataset"><X size={16} /></button></div>}
         {uploadError && <div className="notice warning"><ShieldCheck size={17} /><span>{uploadError}</span></div>}
+
+        {activeTab === 'overview' && <>
+          <section className="panel dataset-panel">
+            <div className="panel-heading"><div><h2>Dataset preview</h2><p>First 8 rows of the uploaded CSV</p></div><span className="mini-label">{columns.length || 0} COLUMNS</span></div>
+            {rows.length ? <div className="table-scroll"><table><thead><tr>{columns.slice(0, 9).map(col => <th key={col}>{col.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.slice(0, 8).map((row, i) => <tr key={i}>{columns.slice(0, 9).map(col => <td key={col}>{String(row[col] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <div className="upload-empty"><div className="upload-empty-icon"><FileUp size={23} /></div><strong>No dataset uploaded yet</strong><p>Choose the team's retail CSV to preview the columns and row count.</p><label className="secondary-button">Choose CSV<input type="file" accept=".csv,text/csv" onChange={handleFile} hidden /></label></div>}
+          </section>
+        </>}
       </div>
     </main>
   </div>
