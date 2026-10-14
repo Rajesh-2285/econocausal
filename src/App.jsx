@@ -5,6 +5,8 @@ import {
   FileUp, LayoutDashboard, Settings2, ShieldCheck, Sparkles, Target, Users, X
 } from 'lucide-react'
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+
 const expectedColumns = [
   'recency', 'history', 'used_discount', 'used_bogo', 'zip_code',
   'is_referral', 'channel', 'offer', 'conversion'
@@ -31,6 +33,7 @@ export default function App() {
   const [uploadMessage, setUploadMessage] = useState('')
   const [uploadError, setUploadError] = useState('')
   const [activeTab, setActiveTab] = useState('overview')
+  const [apiStatus, setApiStatus] = useState('not checked')
 
   function handleFile(event) {
     const file = event.target.files?.[0]
@@ -57,6 +60,17 @@ export default function App() {
       error: error => setUploadError(error.message || 'Could not read this CSV file.')
     })
     event.target.value = ''
+  }
+
+  async function checkApi() {
+    setApiStatus('checking')
+    try {
+      const response = await fetch(`${API_BASE}/health`)
+      if (!response.ok) throw new Error('Health endpoint did not return success')
+      setApiStatus('connected')
+    } catch {
+      setApiStatus('offline')
+    }
   }
 
   const conversions = rows.length && rows.some(r => Object.prototype.hasOwnProperty.call(r, 'conversion'))
@@ -87,33 +101,41 @@ export default function App() {
       <header className="topbar">
         <div className="breadcrumbs">Workspace <span>/</span> <strong>{activeTab === 'customers' ? 'Customer ITEs' : activeTab === 'optimization' ? 'Budget optimizer' : activeTab === 'settings' ? 'Settings' : 'Overview'}</strong></div>
         <div className="top-actions">
-          <button className="icon-button" aria-label="Check backend status"><Bell size={17} /></button>
+          <div className={`api-indicator ${apiStatus}`}><span /> API {apiStatus === 'connected' ? 'connected' : apiStatus === 'offline' ? 'offline' : apiStatus === 'checking' ? 'checking…' : 'not checked'}</div>
+          <button className="icon-button" aria-label="Check backend status" onClick={checkApi}><Bell size={17} /></button>
           <div className="top-avatar">B</div>
         </div>
       </header>
 
       <div className="page-content">
-        <section className="page-heading">
-          <div><div className="section-eyebrow">DYNAMIC PRICING INTELLIGENCE</div><h1>{activeTab === 'customers' ? 'Customer-level treatment effects' : activeTab === 'optimization' ? 'Budget optimization' : 'Causal impact overview'}</h1>
-            <p className="subheading">Use causal effects—not just conversion predictions—to decide who should receive an offer.</p></div>
-          <label className="upload-button"><FileUp size={17} /> Upload dataset<input type="file" accept=".csv,text/csv" onChange={handleFile} hidden /></label>
-        </section>
-
-        <section className="metrics-grid">
-          <Metric label="CUSTOMERS LOADED" value={rows.length ? formatNumber(rows.length) : '—'} note={fileName || 'Upload a CSV to begin'} icon={Users} tone="blue" />
-          <Metric label="OBSERVED CONVERSIONS" value={conversions === null ? '—' : formatNumber(conversions)} note="From conversion = 1 in uploaded data" icon={Activity} tone="green" />
-          <Metric label="CONVERSION RATE" value={conversionRate} note="Descriptive, not causal uplift" icon={BarChart3} tone="purple" />
-          <Metric label="MODEL ITE SCORES" value={customers.length ? formatNumber(customers.length) : '—'} note={customers.length ? 'Received from model/API output' : 'Awaiting trained causal model'} icon={BrainCircuit} tone="orange" />
-        </section>
-
-        {uploadMessage && <div className="notice success"><Database size={17} /><div><strong>{uploadMessage}</strong><span>CSV is loaded in this browser for preview.</span></div><button onClick={() => {setRows([]);setColumns([]);setFileName('');setUploadMessage('')}} aria-label="Clear dataset"><X size={16} /></button></div>}
-        {uploadError && <div className="notice warning"><ShieldCheck size={17} /><span>{uploadError}</span></div>}
-
-        {activeTab === 'overview' && <>
-          <section className="panel dataset-panel">
-            <div className="panel-heading"><div><h2>Dataset preview</h2><p>First 8 rows of the uploaded CSV</p></div><span className="mini-label">{columns.length || 0} COLUMNS</span></div>
-            {rows.length ? <div className="table-scroll"><table><thead><tr>{columns.slice(0, 9).map(col => <th key={col}>{col.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.slice(0, 8).map((row, i) => <tr key={i}>{columns.slice(0, 9).map(col => <td key={col}>{String(row[col] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <div className="upload-empty"><div className="upload-empty-icon"><FileUp size={23} /></div><strong>No dataset uploaded yet</strong><p>Choose the team's retail CSV to preview the columns and row count.</p><label className="secondary-button">Choose CSV<input type="file" accept=".csv,text/csv" onChange={handleFile} hidden /></label></div>}
+        {activeTab === 'settings' ? <section className="panel settings-panel">
+          <div className="section-eyebrow">CONFIGURATION</div><h1>Workspace settings</h1>
+          <p className="subheading">The frontend expects the team's API to run at <code>{API_BASE}</code>.</p>
+          <div className="info-box"><ShieldCheck size={18} /><div><strong>Data integrity</strong><p>No causal effect, Qini value, ROI, or savings is invented in this interface. Those values appear only when returned by the model API.</p></div></div>
+          <button className="primary-button" onClick={checkApi}>Check backend connection</button>
+        </section> : <>
+          <section className="page-heading">
+            <div><div className="section-eyebrow">DYNAMIC PRICING INTELLIGENCE</div><h1>{activeTab === 'customers' ? 'Customer-level treatment effects' : activeTab === 'optimization' ? 'Budget optimization' : 'Causal impact overview'}</h1>
+              <p className="subheading">Use causal effects—not just conversion predictions—to decide who should receive an offer.</p></div>
+            <label className="upload-button"><FileUp size={17} /> Upload dataset<input type="file" accept=".csv,text/csv" onChange={handleFile} hidden /></label>
           </section>
+
+          <section className="metrics-grid">
+            <Metric label="CUSTOMERS LOADED" value={rows.length ? formatNumber(rows.length) : '—'} note={fileName || 'Upload a CSV to begin'} icon={Users} tone="blue" />
+            <Metric label="OBSERVED CONVERSIONS" value={conversions === null ? '—' : formatNumber(conversions)} note="From conversion = 1 in uploaded data" icon={Activity} tone="green" />
+            <Metric label="CONVERSION RATE" value={conversionRate} note="Descriptive, not causal uplift" icon={BarChart3} tone="purple" />
+            <Metric label="MODEL ITE SCORES" value={customers.length ? formatNumber(customers.length) : '—'} note={customers.length ? 'Received from model/API output' : 'Awaiting trained causal model'} icon={BrainCircuit} tone="orange" />
+          </section>
+
+          {uploadMessage && <div className="notice success"><Database size={17} /><div><strong>{uploadMessage}</strong><span>CSV is loaded in this browser for preview.</span></div><button onClick={() => {setRows([]);setColumns([]);setFileName('');setUploadMessage('')}} aria-label="Clear dataset"><X size={16} /></button></div>}
+          {uploadError && <div className="notice warning"><ShieldCheck size={17} /><span>{uploadError}</span></div>}
+
+          {activeTab === 'overview' && <>
+            <section className="panel dataset-panel">
+              <div className="panel-heading"><div><h2>Dataset preview</h2><p>First 8 rows of the uploaded CSV</p></div><span className="mini-label">{columns.length || 0} COLUMNS</span></div>
+              {rows.length ? <div className="table-scroll"><table><thead><tr>{columns.slice(0, 9).map(col => <th key={col}>{col.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.slice(0, 8).map((row, i) => <tr key={i}>{columns.slice(0, 9).map(col => <td key={col}>{String(row[col] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <div className="upload-empty"><div className="upload-empty-icon"><FileUp size={23} /></div><strong>No dataset uploaded yet</strong><p>Choose the team's retail CSV to preview the columns and row count.</p><label className="secondary-button">Choose CSV<input type="file" accept=".csv,text/csv" onChange={handleFile} hidden /></label></div>}
+            </section>
+          </>}
         </>}
       </div>
     </main>
