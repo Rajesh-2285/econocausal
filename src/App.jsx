@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import Plot from 'react-plotly.js'
 import Papa from 'papaparse'
 import {
   Activity, BarChart3, Bell, BrainCircuit, ChevronDown, Database,
@@ -26,14 +27,27 @@ function Metric({ label, value, note, icon: Icon, tone = 'blue' }) {
   </div>
 }
 
+function EmptyChart({ title, description }) {
+  return <div className="empty-chart">
+    <div className="empty-chart-icon"><BarChart3 size={24} /></div>
+    <strong>{title}</strong>
+    <p>{description}</p>
+    <span className="status-pill"><span className="status-dot" /> Waiting for model output</span>
+  </div>
+}
+
 export default function App() {
   const [fileName, setFileName] = useState('')
   const [rows, setRows] = useState([])
   const [columns, setColumns] = useState([])
   const [uploadMessage, setUploadMessage] = useState('')
   const [uploadError, setUploadError] = useState('')
+  const [optimization, setOptimization] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [apiStatus, setApiStatus] = useState('not checked')
+
+  const chart = optimization?.qini || optimization?.uplift_curve || null
+  const hasChart = chart && Array.isArray(chart.x) && Array.isArray(chart.model) && Array.isArray(chart.random)
 
   function handleFile(event) {
     const file = event.target.files?.[0]
@@ -131,6 +145,19 @@ export default function App() {
           {uploadError && <div className="notice warning"><ShieldCheck size={17} /><span>{uploadError}</span></div>}
 
           {activeTab === 'overview' && <>
+            <section className="content-grid">
+              <div className="panel chart-panel">
+                <div className="panel-heading"><div><h2>Qini / uplift gain curve</h2><p>Model performance compared with random targeting</p></div><span className="mini-label">CAUSAL EVALUATION</span></div>
+                {hasChart ? <Plot
+                  data={[
+                    { x: chart.x, y: chart.model, type: 'scatter', mode: 'lines', name: 'Causal model', line: { color: '#5b5ce2', width: 3 }, fill: 'tozeroy', fillcolor: 'rgba(91,92,226,0.08)' },
+                    { x: chart.x, y: chart.random, type: 'scatter', mode: 'lines', name: 'Random rollout', line: { color: '#a5adbd', width: 2, dash: 'dash' } }
+                  ]}
+                  layout={{ autosize: true, height: 280, margin: { l: 45, r: 20, t: 18, b: 45 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { family: 'Inter, sans-serif', color: '#64708a', size: 11 }, xaxis: { title: 'Fraction of customers targeted', gridcolor: '#eef0f6', zeroline: false }, yaxis: { title: 'Cumulative uplift / gain', gridcolor: '#eef0f6', zeroline: false }, legend: { orientation: 'h', y: -0.25 } }}
+                  config={{ responsive: true, displayModeBar: false }} style={{ width: '100%' }} useResizeHandler
+                /> : <EmptyChart title="Curve appears after model evaluation" description="Upload the dataset, then connect the trained model API. This chart will use the model's Qini/uplift output and random baseline—no placeholder curve is shown." />}
+              </div>
+            </section>
             <section className="panel dataset-panel">
               <div className="panel-heading"><div><h2>Dataset preview</h2><p>First 8 rows of the uploaded CSV</p></div><span className="mini-label">{columns.length || 0} COLUMNS</span></div>
               {rows.length ? <div className="table-scroll"><table><thead><tr>{columns.slice(0, 9).map(col => <th key={col}>{col.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.slice(0, 8).map((row, i) => <tr key={i}>{columns.slice(0, 9).map(col => <td key={col}>{String(row[col] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <div className="upload-empty"><div className="upload-empty-icon"><FileUp size={23} /></div><strong>No dataset uploaded yet</strong><p>Choose the team's retail CSV to preview the columns and row count.</p><label className="secondary-button">Choose CSV<input type="file" accept=".csv,text/csv" onChange={handleFile} hidden /></label></div>}
