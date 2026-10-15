@@ -1,9 +1,9 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import Plot from 'react-plotly.js'
 import Papa from 'papaparse'
 import {
   Activity, BarChart3, Bell, BrainCircuit, ChevronDown, Database,
-  FileUp, LayoutDashboard, Settings2, ShieldCheck, Sparkles, Target, Users, X
+  FileUp, Filter, LayoutDashboard, Search, Settings2, ShieldCheck, Sparkles, Target, Users, X
 } from 'lucide-react'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
@@ -16,6 +16,12 @@ const expectedColumns = [
 function formatNumber(value) {
   if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value))) return '—'
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
+}
+
+function findIteKey(rows) {
+  if (!rows.length) return null
+  const candidates = ['ite', 'ite_score', 'individual_treatment_effect', 'treatment_effect', 'uplift_score']
+  return candidates.find(key => Object.keys(rows[0]).some(k => k.toLowerCase() === key)) || null
 }
 
 function Metric({ label, value, note, icon: Icon, tone = 'blue' }) {
@@ -43,8 +49,28 @@ export default function App() {
   const [uploadMessage, setUploadMessage] = useState('')
   const [uploadError, setUploadError] = useState('')
   const [optimization, setOptimization] = useState(null)
+  const [search, setSearch] = useState('')
+  const [offerFilter, setOfferFilter] = useState('all')
+  const [sortDirection, setSortDirection] = useState('desc')
   const [activeTab, setActiveTab] = useState('overview')
   const [apiStatus, setApiStatus] = useState('not checked')
+
+  const iteKey = useMemo(() => findIteKey(optimization?.customers || rows), [optimization, rows])
+  const customers = useMemo(() => {
+    const source = optimization?.customers || rows
+    if (!iteKey) return []
+    return source.map((r, index) => ({
+      ...r,
+      __id: r.customer_id ?? r.customerId ?? r.id ?? `Row ${index + 1}`,
+      __ite: Number(r[Object.keys(r).find(k => k.toLowerCase() === iteKey)])
+    })).filter(r => Number.isFinite(r.__ite))
+  }, [optimization, rows, iteKey])
+
+  const filteredCustomers = useMemo(() => {
+    let result = customers.filter(row => String(row.__id).toLowerCase().includes(search.toLowerCase()))
+    if (offerFilter !== 'all') result = result.filter(row => String(row.offer || '').toLowerCase() === offerFilter.toLowerCase())
+    return [...result].sort((a, b) => sortDirection === 'desc' ? b.__ite - a.__ite : a.__ite - b.__ite)
+  }, [customers, search, offerFilter, sortDirection])
 
   const chart = optimization?.qini || optimization?.uplift_curve || null
   const hasChart = chart && Array.isArray(chart.x) && Array.isArray(chart.model) && Array.isArray(chart.random)
@@ -90,7 +116,7 @@ export default function App() {
   const conversions = rows.length && rows.some(r => Object.prototype.hasOwnProperty.call(r, 'conversion'))
     ? rows.filter(r => Number(r.conversion) === 1).length : null
   const conversionRate = rows.length && conversions !== null ? `${(conversions / rows.length * 100).toFixed(1)}%` : '—'
-  const customers = []
+  const offers = [...new Set(rows.map(r => r.offer).filter(Boolean))]
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -163,7 +189,18 @@ export default function App() {
               {rows.length ? <div className="table-scroll"><table><thead><tr>{columns.slice(0, 9).map(col => <th key={col}>{col.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.slice(0, 8).map((row, i) => <tr key={i}>{columns.slice(0, 9).map(col => <td key={col}>{String(row[col] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <div className="upload-empty"><div className="upload-empty-icon"><FileUp size={23} /></div><strong>No dataset uploaded yet</strong><p>Choose the team's retail CSV to preview the columns and row count.</p><label className="secondary-button">Choose CSV<input type="file" accept=".csv,text/csv" onChange={handleFile} hidden /></label></div>}
             </section>
           </>}
+
+          {activeTab === 'customers' && <section className="panel customer-panel">
+            <div className="panel-heading"><div><h2>Individual treatment effects</h2><p>Search and filter customer-level model outputs</p></div><span className="mini-label">{customers.length} SCORES</span></div>
+            <div className="table-controls">
+              <div className="search-box"><Search size={17} /><input placeholder="Search customer ID…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+              <div className="select-box"><Filter size={16} /><select value={offerFilter} onChange={e => setOfferFilter(e.target.value)}><option value="all">All offers</option>{offers.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <button className="sort-button" onClick={() => setSortDirection(s => s === 'desc' ? 'asc' : 'desc')}>ITE {sortDirection === 'desc' ? '↓' : '↑'}</button>
+            </div>
+            {customers.length ? <div className="table-scroll"><table><thead><tr><th>Customer ID</th><th>Offer</th><th>Individual treatment effect</th><th>Targeting signal</th></tr></thead><tbody>{filteredCustomers.slice(0, 100).map((row, i) => <tr key={`${row.__id}-${i}`}><td className="customer-id">{row.__id}</td><td>{row.offer || '—'}</td><td className={row.__ite >= 0 ? 'positive' : 'negative'}>{formatNumber(row.__ite)}</td><td><span className={`signal ${row.__ite > 0 ? 'good' : row.__ite < 0 ? 'bad' : 'neutral'}`}>{row.__ite > 0 ? 'Positive uplift' : row.__ite < 0 ? 'Negative uplift' : 'No estimated effect'}</span></td></tr>)}</tbody></table><div className="table-footer">Showing {Math.min(filteredCustomers.length, 100)} of {filteredCustomers.length} matching scores</div></div> : <div className="upload-empty"><div className="upload-empty-icon"><BrainCircuit size={23} /></div><strong>No genuine ITE scores available yet</strong><p>The retail CSV contains customer features and conversion outcomes, but ITE scores must be generated by the team's trained causal model. Once the API returns customer rows with an <code>ite</code> or <code>treatment_effect</code> field, this searchable table will populate.</p><button className="secondary-button" onClick={() => setActiveTab('overview')}>Go to dashboard</button></div>}
+          </section>}
         </>}
+        <footer className="footer"><span>ECONOCAUSAL · DYNAMIC PRICING VIA DOUBLE MACHINE LEARNING</span><span><span className="footer-dot" /> Data stays in this browser until you send an API request</span></footer>
       </div>
     </main>
   </div>
