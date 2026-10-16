@@ -2,8 +2,9 @@ import React, { useMemo, useState } from 'react'
 import Plot from 'react-plotly.js'
 import Papa from 'papaparse'
 import {
-  Activity, BarChart3, Bell, BrainCircuit, ChevronDown, Database,
-  FileUp, Filter, LayoutDashboard, Search, Settings2, ShieldCheck, Sparkles, Target, Users, X
+  Activity, ArrowUpRight, BarChart3, Bell, BrainCircuit, ChevronDown,
+  CircleDollarSign, Database, FileUp, Filter, LayoutDashboard, Search,
+  Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Target, Users, X
 } from 'lucide-react'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
@@ -48,7 +49,12 @@ export default function App() {
   const [columns, setColumns] = useState([])
   const [uploadMessage, setUploadMessage] = useState('')
   const [uploadError, setUploadError] = useState('')
+  const [budget, setBudget] = useState('10000')
+  const [maxOfferCost, setMaxOfferCost] = useState('20')
+  const [targetGroup, setTargetGroup] = useState('all')
   const [optimization, setOptimization] = useState(null)
+  const [optimizing, setOptimizing] = useState(false)
+  const [optimizationError, setOptimizationError] = useState('')
   const [search, setSearch] = useState('')
   const [offerFilter, setOfferFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState('desc')
@@ -81,6 +87,8 @@ export default function App() {
     setFileName(file.name)
     setUploadMessage('')
     setUploadError('')
+    setOptimization(null)
+    setOptimizationError('')
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
@@ -113,6 +121,39 @@ export default function App() {
     }
   }
 
+  async function runOptimization(event) {
+    event.preventDefault()
+    setOptimizationError('')
+    if (!rows.length) {
+      setOptimizationError('Upload the retail CSV first.')
+      return
+    }
+    setOptimizing(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/optimize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          budget: Number(budget),
+          max_offer_cost: Number(maxOfferCost),
+          target_group: targetGroup,
+          rows,
+          columns
+        })
+      })
+      if (!response.ok) throw new Error(`Backend returned ${response.status}. Confirm that /api/optimize is implemented by your team.`)
+      const result = await response.json()
+      setOptimization(result)
+      if (!result.customers && !result.qini && !result.uplift_curve) {
+        setOptimizationError('The API responded, but did not return customer ITE scores or curve data. Check the response contract in README.md.')
+      }
+    } catch (error) {
+      setOptimizationError(`${error.message}. The dashboard and CSV preview work locally; causal scores and optimized allocation require the team's backend API.`)
+    } finally {
+      setOptimizing(false)
+    }
+  }
+
   const conversions = rows.length && rows.some(r => Object.prototype.hasOwnProperty.call(r, 'conversion'))
     ? rows.filter(r => Number(r.conversion) === 1).length : null
   const conversionRate = rows.length && conversions !== null ? `${(conversions / rows.length * 100).toFixed(1)}%` : '—'
@@ -132,7 +173,7 @@ export default function App() {
       </nav>
       <div className="sidebar-bottom">
         <div className="sidebar-tip"><div className="tip-icon"><Sparkles size={16} /></div><strong>Make every offer count.</strong><p>Target customers whose behaviour can actually be changed by an offer.</p></div>
-        <button className={`nav-item muted ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}><Settings2 size={18} /> Settings</button>
+        <button className="nav-item muted" onClick={() => setActiveTab('settings')}><Settings2 size={18} /> Settings</button>
         <div className="profile"><div className="avatar">EC</div><div className="profile-copy"><strong>Project workspace</strong><span>Team dashboard</span></div><ChevronDown size={16} /></div>
       </div>
     </aside>
@@ -167,7 +208,7 @@ export default function App() {
             <Metric label="MODEL ITE SCORES" value={customers.length ? formatNumber(customers.length) : '—'} note={customers.length ? 'Received from model/API output' : 'Awaiting trained causal model'} icon={BrainCircuit} tone="orange" />
           </section>
 
-          {uploadMessage && <div className="notice success"><Database size={17} /><div><strong>{uploadMessage}</strong><span>CSV is loaded in this browser for preview.</span></div><button onClick={() => {setRows([]);setColumns([]);setFileName('');setUploadMessage('')}} aria-label="Clear dataset"><X size={16} /></button></div>}
+          {uploadMessage && <div className="notice success"><Database size={17} /><div><strong>{uploadMessage}</strong><span>CSV is loaded in this browser for preview.</span></div><button onClick={() => {setRows([]);setColumns([]);setFileName('');setUploadMessage('');setOptimization(null)}} aria-label="Clear dataset"><X size={16} /></button></div>}
           {uploadError && <div className="notice warning"><ShieldCheck size={17} /><span>{uploadError}</span></div>}
 
           {activeTab === 'overview' && <>
@@ -182,6 +223,22 @@ export default function App() {
                   layout={{ autosize: true, height: 280, margin: { l: 45, r: 20, t: 18, b: 45 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { family: 'Inter, sans-serif', color: '#64708a', size: 11 }, xaxis: { title: 'Fraction of customers targeted', gridcolor: '#eef0f6', zeroline: false }, yaxis: { title: 'Cumulative uplift / gain', gridcolor: '#eef0f6', zeroline: false }, legend: { orientation: 'h', y: -0.25 } }}
                   config={{ responsive: true, displayModeBar: false }} style={{ width: '100%' }} useResizeHandler
                 /> : <EmptyChart title="Curve appears after model evaluation" description="Upload the dataset, then connect the trained model API. This chart will use the model's Qini/uplift output and random baseline—no placeholder curve is shown." />}
+              </div>
+              <div className="panel budget-panel">
+                <div className="panel-heading"><div><h2>Campaign constraints</h2><p>Set limits for the optimization run</p></div><div className="round-icon"><SlidersHorizontal size={18} /></div></div>
+                <form onSubmit={runOptimization}>
+                  <label className="field-label" htmlFor="budget">Total campaign budget <span>₹</span></label>
+                  <div className="input-wrap"><CircleDollarSign size={17} /><input id="budget" type="number" min="0" step="100" required value={budget} onChange={e => setBudget(e.target.value)} /></div>
+                  <label className="field-label" htmlFor="offer-cost">Maximum cost per offer <span>₹</span></label>
+                  <div className="input-wrap"><CircleDollarSign size={17} /><input id="offer-cost" type="number" min="0" step="1" required value={maxOfferCost} onChange={e => setMaxOfferCost(e.target.value)} /></div>
+                  <label className="field-label" htmlFor="target-group">Customer group</label>
+                  <select id="target-group" value={targetGroup} onChange={e => setTargetGroup(e.target.value)}>
+                    <option value="all">All eligible customers</option><option value="persuadables">Persuadables</option><option value="sure_things">Sure Things</option><option value="lost_causes">Lost Causes</option><option value="sleeping_dogs">Sleeping Dogs</option>
+                  </select>
+                  <button className="primary-button full" disabled={optimizing}>{optimizing ? 'Optimizing…' : <><Sparkles size={16} /> Run budget optimization</>}</button>
+                </form>
+                <p className="footnote">Requires the backend optimization endpoint and trained causal outputs.</p>
+                {optimizationError && <div className="inline-error">{optimizationError}</div>}
               </div>
             </section>
             <section className="panel dataset-panel">
@@ -198,6 +255,13 @@ export default function App() {
               <button className="sort-button" onClick={() => setSortDirection(s => s === 'desc' ? 'asc' : 'desc')}>ITE {sortDirection === 'desc' ? '↓' : '↑'}</button>
             </div>
             {customers.length ? <div className="table-scroll"><table><thead><tr><th>Customer ID</th><th>Offer</th><th>Individual treatment effect</th><th>Targeting signal</th></tr></thead><tbody>{filteredCustomers.slice(0, 100).map((row, i) => <tr key={`${row.__id}-${i}`}><td className="customer-id">{row.__id}</td><td>{row.offer || '—'}</td><td className={row.__ite >= 0 ? 'positive' : 'negative'}>{formatNumber(row.__ite)}</td><td><span className={`signal ${row.__ite > 0 ? 'good' : row.__ite < 0 ? 'bad' : 'neutral'}`}>{row.__ite > 0 ? 'Positive uplift' : row.__ite < 0 ? 'Negative uplift' : 'No estimated effect'}</span></td></tr>)}</tbody></table><div className="table-footer">Showing {Math.min(filteredCustomers.length, 100)} of {filteredCustomers.length} matching scores</div></div> : <div className="upload-empty"><div className="upload-empty-icon"><BrainCircuit size={23} /></div><strong>No genuine ITE scores available yet</strong><p>The retail CSV contains customer features and conversion outcomes, but ITE scores must be generated by the team's trained causal model. Once the API returns customer rows with an <code>ite</code> or <code>treatment_effect</code> field, this searchable table will populate.</p><button className="secondary-button" onClick={() => setActiveTab('overview')}>Go to dashboard</button></div>}
+          </section>}
+
+          {activeTab === 'optimization' && <section className="panel optimization-panel">
+            <div className="panel-heading"><div><h2>Budget allocation results</h2><p>Allocation returned by the team's constrained optimizer</p></div><span className="mini-label">SCI-PY / BACKEND</span></div>
+            {optimization?.allocation?.length ? <div className="table-scroll"><table><thead><tr>{Object.keys(optimization.allocation[0]).map(key => <th key={key}>{key.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{optimization.allocation.map((row, i) => <tr key={i}>{Object.keys(optimization.allocation[0]).map(key => <td key={key}>{String(row[key] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <div className="upload-empty"><div className="upload-empty-icon"><Target size={23} /></div><strong>No allocation generated yet</strong><p>Set the budget constraints on Overview and run optimization. The table appears only after the backend returns real allocation results.</p><button className="secondary-button" onClick={() => setActiveTab('overview')}>Set campaign constraints</button></div>}
+            {optimization?.summary && <div className="result-summary">{Object.entries(optimization.summary).map(([key, value]) => <div key={key}><span>{key.replaceAll('_', ' ')}</span><strong>{String(value)}</strong></div>)}</div>}
+            {optimizationError && <div className="inline-error">{optimizationError}</div>}
           </section>}
         </>}
         <footer className="footer"><span>ECONOCAUSAL · DYNAMIC PRICING VIA DOUBLE MACHINE LEARNING</span><span><span className="footer-dot" /> Data stays in this browser until you send an API request</span></footer>
