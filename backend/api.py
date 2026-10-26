@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, List
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -27,12 +28,7 @@ class OptimizeRequest(BaseModel):
     columns: List[str] = []
 @app.get("/")
 def read_root():
-    return {
-        "status": "online",
-        "message": "EconoCausal API is active",
-        "docs": "http://127.0.0.1:8000/docs",
-        "health": "http://127.0.0.1:8000/health"
-    }
+    return RedirectResponse(url="/docs")
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
