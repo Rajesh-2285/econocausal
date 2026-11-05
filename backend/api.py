@@ -1,111 +1,166 @@
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+"""
+EconoCausal - FastAPI Backend Service & Dashboard Serving Layer
+Provides health diagnostics, static dashboard rendering, and real-time
+constrained SciPy linear programming budget allocation endpoints.
+"""
 
+import os
+from typing import Optional, List
 import numpy as np
 import pandas as pd
-from typing import Any, Dict, List
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from scipy.optimize import linprog
 
-app = FastAPI(title="EconoCausal API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# ---------------------------------------------------------
+# App Initialization & Templates
+# ---------------------------------------------------------
+app = FastAPI(
+    title="econocausal API",
+    description="Causal Machine Learning & Constrained Uplift Budget Optimization Platform",
+    version="1.0.0"
 )
 
-class OptimizeRequest(BaseModel):
+# Resolve templates directory relative to this file
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+# ---------------------------------------------------------
+# Data Artifact Loader
+# ---------------------------------------------------------
+def load_customer_data() -> pd.DataFrame:
+    """Load benchmark dataset containing ITE uplift scores."""
+    candidate_paths = [
+        os.path.join(os.path.dirname(BASE_DIR), "data", "customer_ite_scores.csv"),
+        os.path.join(BASE_DIR, "retail_data.csv"),
+        os.path.join(os.path.dirname(BASE_DIR), "backend", "retail_data.csv")
+    ]
+    for path in candidate_paths:
+        if os.path.exists(path):
+            df = pd.read_csv(path)
+            # Ensure uplift column exists
+            if "ite_score" not in df.columns:
+                if "ite" in df.columns:
+                    df["ite_score"] = df["ite"]
+                elif "predicted_ite" in df.columns:
+                    df["ite_score"] = df["predicted_ite"]
+                else:
+                    # Fallback uplift assignment if synthetic base
+                    np.random.seed(42)
+                    df["ite_score"] = np.random.normal(loc=0.06, scale=0.03, size=len(df))
+            return df
+    raise FileNotFoundError("Customer data artifact could not be located.")
+
+# ---------------------------------------------------------
+# Pydantic Schemas
+# ---------------------------------------------------------
+class OptimizationRequest(BaseModel):
     budget: float = 10000.0
-    max_offer_cost: float = 20.0
-    target_group: str = "all"
-    rows: List[Dict[str, Any]] = []
-    columns: List[str] = []
-@app.get("/")
-def read_root():
-    return RedirectResponse(url="/docs")
+    cost_per_contact: float = 1.50
+    channel_filter: Optional[str] = "All"
+
+class OptimizationResponse(BaseModel):
+    status: str
+    total_customers_evaluated: int
+    targeted_customers_count: int
+    budget_allocated: float
+    total_expected_incremental_conversions: float
+    efficiency_gain_vs_random: float
+    decile_uplift_distribution: List[float]
+
+# ---------------------------------------------------------
+# Routes
+# ---------------------------------------------------------
+@app.get("/", response_class=HTMLResponse)
+async def serve_dashboard(request: Request):
+    """Serve the complete frontend dashboard UI."""
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html"
+    )
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
-
-@app.post("/api/optimize")
-def optimize_campaign(req: OptimizeRequest):
-    scores_path = "data/customer_ite_scores.csv"
-
-    # 1. Load real precomputed ITE scores or compute mock baseline if not present
-    if os.path.exists(scores_path):
-        df = pd.read_csv(scores_path)
-    else:
-        # Fallback if Double ML scores have not been generated yet
-        df = pd.DataFrame({
-            "history": np.random.uniform(50, 500, 1000),
-            "ite_score": np.random.normal(0.0639, 0.02, 1000)
-        })
-
-    # Ensure customer identifier exists
-    if "customer_id" not in df.columns:
-        df["customer_id"] = [f"C{i+1:05d}" for i in range(len(df))]
-
-    # 2. Rank customers by highest causal treatment effect
-    sorted_df = df.sort_values(by="ite_score", ascending=False).reset_index(drop=True)
-
-    # 3. Constrained Budget Allocation
-    cost_per_offer = req.max_offer_cost if req.max_offer_cost > 0 else 20.0
-    max_targets = int(req.budget / cost_per_offer) if req.budget > 0 else len(sorted_df)
-    targeted_df = sorted_df.iloc[:max_targets]
-
-    # 4. Generate Qini / Uplift Gain Curve coordinates
-    deciles = np.linspace(0.0, 1.0, 11)
-    x_curve = [round(float(q), 2) for q in deciles]
-    total_ite = float(sorted_df["ite_score"].sum())
-
-    model_curve = [0.0]
-    for q in deciles[1:]:
-        cutoff = int(q * len(sorted_df))
-        model_curve.append(round(float(sorted_df.iloc[:cutoff]["ite_score"].sum()), 4))
-
-    random_curve = [round(float(q * total_ite), 4) for q in deciles]
-
-    # 5. Format payload strictly matching frontend requirements
-    customers_payload = [
-        {
-            "customer_id": str(row["customer_id"]),
-            "offer": "Discount",
-            "ite": round(float(row["ite_score"]), 4)
-        }
-        for _, row in sorted_df.head(200).iterrows()
-    ]
-
-    allocation_payload = [
-        {
-            "customer_id": str(row["customer_id"]),
-            "allocated_cost": cost_per_offer,
-            "expected_uplift": round(float(row["ite_score"]), 4)
-        }
-        for _, row in targeted_df.head(200).iterrows()
-    ]
+    """Service health and diagnostics check."""
+    data_loaded = True
+    try:
+        df = load_customer_data()
+        total_records = len(df)
+    except Exception:
+        data_loaded = False
+        total_records = 0
 
     return {
-        "customers": customers_payload,
-        "qini": {
-            "x": x_curve,
-            "model": model_curve,
-            "random": random_curve
-        },
-        "allocation": allocation_payload,
-        "summary": {
-            "budget": req.budget,
-            "max_offer_cost": cost_per_offer,
-            "targeted_count": len(targeted_df),
-            "expected_incremental_conversions": round(float(targeted_df["ite_score"].sum()), 2)
-        }
+        "status": "healthy",
+        "service": "econocausal-backend",
+        "dataset_ready": data_loaded,
+        "total_records_available": total_records,
+        "solver": "scipy-highs"
     }
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("backend.api:app", host="127.0.0.1", port=8000, reload=True)
+@app.post("/api/optimize", response_model=OptimizationResponse)
+def run_budget_optimization(payload: OptimizationRequest):
+    """
+    Executes SciPy Linear Programming (HiGHS) to maximize incremental
+    conversions subject to budget constraints:
+      max sum(ITE_i * x_i) subject to sum(cost_i * x_i) <= budget
+    """
+    try:
+        df = load_customer_data()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Optional channel filtering
+    if payload.channel_filter and payload.channel_filter != "All" and "channel" in df.columns:
+        df = df[df["channel"].str.lower() == payload.channel_filter.lower()].reset_index(drop=True)
+
+    total_eval = len(df)
+    if total_eval == 0:
+        raise HTTPException(status_code=400, detail="No customer records match filter criteria.")
+
+    max_contacts = int(payload.budget / max(payload.cost_per_contact, 0.01))
+    max_contacts = min(max_contacts, total_eval)
+
+    # SciPy linprog formulation: Minimize -sum(ITE_i * x_i)
+    c = -df["ite_score"].values
+    A = np.ones((1, total_eval))
+    b = np.array([max_contacts])
+    bounds = [(0, 1) for _ in range(total_eval)]
+
+    res = linprog(c, A_ub=A, b_ub=b, bounds=bounds, method="highs")
+
+    if not res.success:
+        raise HTTPException(status_code=500, detail="SciPy solver failed to find feasible allocation.")
+
+    selected_mask = res.x > 0.5
+    targeted_count = int(np.sum(selected_mask))
+    expected_conversions = float(np.sum(df.loc[selected_mask, "ite_score"]))
+    actual_spend = targeted_count * payload.cost_per_contact
+
+    # Compute uplift decile distribution (10 bins)
+    df["decile"] = pd.qcut(df["ite_score"], q=10, labels=False, duplicates="drop")
+    decile_uplift = (
+        df.groupby("decile", observed=False)["ite_score"]
+        .mean()
+        .sort_index(ascending=False)
+        .round(4)
+        .tolist()
+    )
+
+    # Random baseline benchmark
+    np.random.seed(42)
+    random_sample = df["ite_score"].sample(n=targeted_count, random_state=42).sum()
+    efficiency = round(expected_conversions / max(float(random_sample), 1e-5), 2)
+
+    return OptimizationResponse(
+        status="SUCCESS",
+        total_customers_evaluated=total_eval,
+        targeted_customers_count=targeted_count,
+        budget_allocated=round(actual_spend, 2),
+        total_expected_incremental_conversions=round(expected_conversions, 2),
+        efficiency_gain_vs_random=efficiency,
+        decile_uplift_distribution=decile_uplift
+    )

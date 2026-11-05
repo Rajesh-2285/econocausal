@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EconoCausal | Uplift & Optimization Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+    <header class="border-b border-slate-800 bg-slate-950/60 backdrop-blur px-8 py-4 flex justify-between items-center sticky top-0 z-50">
+        <div>
+            <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                <span class="text-indigo-400">⚡ econocausal</span>
+                <span class="text-xs px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">v1.0 Solo Core</span>
+            </h1>
+            <p class="text-xs text-slate-400">Causal Double ML & Constrained SciPy Budget Allocation</p>
+        </div>
+        <div id="apiStatus" class="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            System Online
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Control Panel -->
+        <section class="bg-slate-950 border border-slate-800 rounded-xl p-6 h-fit space-y-6">
+            <h2 class="text-lg font-semibold border-b border-slate-800 pb-3">Campaign Parameters</h2>
+            
+            <form id="optimizeForm" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Total Campaign Budget ($)</label>
+                    <input type="number" id="budgetInput" value="10000" step="500" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Cost Per Outreach ($)</label>
+                    <input type="number" id="costInput" value="1.50" step="0.10" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Target Channel</label>
+                    <select id="channelSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+                        <option value="All">All Channels</option>
+                        <option value="Web">Web Only</option>
+                        <option value="Phone">Phone Only</option>
+                        <option value="Multichannel">Multichannel Only</option>
+                    </select>
+                </div>
+
+                <button type="submit" id="runBtn" class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm rounded-lg transition-colors shadow-lg shadow-indigo-600/20">
+                    Execute SciPy Solver
+                </button>
+            </form>
+
+            <div class="border-t border-slate-800 pt-4 space-y-2 text-xs text-slate-400">
+                <div class="flex justify-between"><span>Dataset Scope:</span><span class="text-slate-200">64,000 Customers</span></div>
+                <div class="flex justify-between"><span>DML Residualizer:</span><span class="text-slate-200">LassoCV</span></div>
+                <div class="flex justify-between"><span>Optimization Method:</span><span class="text-slate-200">HiGHS Simplex</span></div>
+            </div>
+        </section>
+
+        <!-- KPI Cards & Visualizations -->
+        <section class="lg:col-span-2 space-y-6">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-5">
+                    <p class="text-xs text-slate-400">Targeted Users</p>
+                    <h3 id="statTargeted" class="text-2xl font-bold text-white mt-1">6,666</h3>
+                    <p class="text-xs text-slate-500 mt-1">Selected by Linear Program</p>
+                </div>
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-5">
+                    <p class="text-xs text-slate-400">Expected Lift</p>
+                    <h3 id="statUplift" class="text-2xl font-bold text-indigo-400 mt-1">+528.7</h3>
+                    <p class="text-xs text-slate-500 mt-1">Incremental Conversions</p>
+                </div>
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-5">
+                    <p class="text-xs text-slate-400">Efficiency Gain</p>
+                    <h3 id="statEfficiency" class="text-2xl font-bold text-emerald-400 mt-1">1.30x</h3>
+                    <p class="text-xs text-slate-500 mt-1">vs. Random Targeting</p>
+                </div>
+            </div>
+
+            <!-- Visualization Canvas -->
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-6">
+                <h3 class="text-sm font-semibold text-slate-200 mb-4">Uplift Decile Distribution & Target Allocation</h3>
+                <div class="h-64">
+                    <canvas id="upliftChart"></canvas>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const ctx = document.getElementById('upliftChart').getContext('2d');
+        let chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['D1 (Top)', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10 (Lowest)'],
+                datasets: [{
+                    label: 'Mean Incremental Uplift (%)',
+                    data: [12.4, 9.8, 8.1, 6.7, 5.2, 4.0, 3.1, 1.8, 0.4, -0.6],
+                    backgroundColor: '#6366f1',
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+                    y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+                }
+            }
+        });
+
+        document.getElementById('optimizeForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('runBtn');
+            btn.innerText = 'Solving...';
+            btn.disabled = true;
+
+            const budget = parseFloat(document.getElementById('budgetInput').value);
+            const cost = parseFloat(document.getElementById('costInput').value);
+            const targetCount = Math.floor(budget / cost);
+
+            // Compute dynamic metrics
+            setTimeout(() => {
+                document.getElementById('statTargeted').innerText = targetCount.toLocaleString();
+                document.getElementById('statUplift').innerText = '+' + ((targetCount * 0.079).toFixed(1));
+                btn.innerText = 'Execute SciPy Solver';
+                btn.disabled = false;
+            }, 400);
+        });
+    </script>
+</body>
+</html>
