@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  backend-api:
+    build: .
+    container_name: econocausal-api
+    ports:
+      - "8000:8000"
+    command: uvicorn backend.api:app --host 0.0.0.0 --port 8000
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  dashboard-ui:
+    build: .
+    container_name: econocausal-dashboard
+    ports:
+      - "8501:8501"
+    command: streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0
+    environment:
+      - PYTHONUNBUFFERED=1

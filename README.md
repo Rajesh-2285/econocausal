@@ -1,63 +1,119 @@
+# ⚡ EconoCausal: Dynamic Pricing via Double Machine Learning
 
-
-Backend causal inference pipeline and API service developed on the `Rajesh` branch. This engine estimates heterogeneous treatment effects across customer segments using Double Machine Learning (DML), validates causal robustness via refutation tests, and optimizes marketing spend under constrained budget limits.
-
-## Key Features
-
-- **Causal Graph & Identification**: Baseline causal DAG formulated with DoWhy to isolate treatment assignment mechanisms and estimate Average Treatment Effect (ATE).
-- **Refutation Validation**: Placebo treatment and random common cause refutation tests to verify estimate stability against unobserved bias.
-- **Double Machine Learning Uplift**: EconML-based estimation yielding individual treatment effect (`ITE`) scores across customer profiles, exported to `data/customer_ite_scores.csv`.
-- **Constrained Optimization**: SciPy-powered allocation engine prioritizing high-uplift persuadables within campaign budget and maximum cost constraints.
-- **FastAPI Bridge**: High-performance REST service providing live `/health` status, dynamic decile Qini cumulative gain curves, and ranked customer target rosters.
-
-## Quickstart (Windows PowerShell)
-
-1. Activate your virtual environment:
-
-```powershell
-.\venv\Scripts\Activate.ps1
-Install dependencies:PowerShellpip install -r requirements.txt
-Start the FastAPI backend server:PowerShellpython -m backend.api
-Service Endpoints:Interactive API Docs: http://127.0.0.1:8000/docs (default redirect from http://127.0.0.1:8000/)Health Check: http://127.0.0.1:8000/healthOptimization Endpoint: POST http://127.0.0.1:8000/api/optimizeAPI Contract SpecificationRequest (POST /api/optimize)JSON{
-  "budget": 10000,
-  "max_offer_cost": 20,
-  "target_group": "all",
-  "rows": [],
-  "columns": []
-}
-Response (200 OK)JSON{
-  "customers": [
-    {
-      "customer_id": "C00001",
-      "offer": "Discount",
-      "ite": 0.1287
-    }
-  ],
-  "qini": {
-    "x": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-    "model": [0.0, 0.045, 0.098, 0.152, 0.201, 0.245, 0.282, 0.311, 0.334, 0.348, 0.355],
-    "random": [0.0, 0.035, 0.071, 0.106, 0.142, 0.177, 0.213, 0.248, 0.284, 0.319, 0.355]
-  },
-  "allocation": [
-    {
-      "customer_id": "C00001",
-      "offer": "Discount",
-      "ite": 0.1287,
-      "estimated_cost": 20
-    }
-  ],
-  "summary": {
-    "customers_selected": 200,
-    "budget_used": 4000,
-    "estimated_incremental_conversions": 24.3
-  }
-}
+An end-to-end Causal AI and Prescriptive Optimization system designed to differentiate between organic baseline behavior and true incremental treatment effects ($P(\text{Conversion})$ vs $\text{ITE}$). The platform allocates limited promotional budgets to maximize ROI by targeting strictly "Persuadable" customer segments.
 
 ---
 
-### What to do after saving on GitHub
+## Architecture Overview
 
-Once you commit this file directly on GitHub, sync your local PC by running:
+```
+                                      [ Retail Customer Records (64,000) ]
+                                                        │
+                                                        ▼
+                                       [ Microsoft DoWhy Causal DAG ]
+                                  (Identified & Refuted Common Confounders)
+                                                        │
+                                                        ▼
+                                       [ EconML Double Machine Learning ]
+                                 (First-Stage Residualization via LassoCV)
+                                                        │
+                                                        ▼
+                                     [ Individual Treatment Effects (ITE) ]
+                                                        │
+                                                        ▼
+                                  [ Prescriptive SciPy HiGHS Linear Solver ]
+                                     Maximize Lift Subject to Budget <= B
+                                                        │
+                                ┌───────────────────────┴───────────────────────┐
+                                ▼                                               ▼
+                    [ FastAPI REST Endpoints ]                    [ Interactive Dashboards ]
+                     - GET /health                                 - FastAPI / Jinja2 UI (Port 8000)
+                     - POST /api/optimize                          - Streamlit Analytics (Port 8501)
+                     - backend/drift_detector.py
+```
 
-```cmd
-git pull origin Rajesh
+---
+
+## Module Breakdown
+
+1. **Causal Graphing & Identification (`backend/causal_engine.py`)**
+   - Microsoft DoWhy DAG modeling treatments (`offer`), confounders (`recency`, `history`), and outcome (`conversion`).
+   - Statistical refutation tests (Placebo Treatment and Random Common Cause).
+
+2. **Double Machine Learning Engine (`backend/double_ml.py`, `models/dml_hyperparams.py`)**
+   - Estimates individual treatment effects using out-of-fold orthogonalization.
+   - Evaluates candidate residualizers (`LassoCV`, `ElasticNetCV`, `GradientBoosting`, `RandomForest`).
+
+3. **Prescriptive Budget Optimizer (`analytics/segmentation_optimizer.py`, `backend/optimizer.py`)**
+   - Solves constrained linear programs via SciPy HiGHS simplex method.
+   - Groups users into 4 quadrants: Persuadables, Sure Things, Lost Causes, and Sleeping Dogs.
+
+4. **Automated Drift Monitor (`backend/drift_detector.py`)**
+   - Continuous feature distribution checks via Kolmogorov-Smirnov (KS) two-sample tests and Population Stability Index (PSI).
+
+5. **API & Visualization Suite (`backend/api.py`, `dashboard/app.py`)**
+   - FastAPI microservice with automated Swagger documentation (`/docs`).
+   - Live interactive charts for budget adjustments, decile lift distributions, and customer prescription tables.
+
+---
+
+## Quickstart Guide (Windows PowerShell)
+
+### 1. Local Environment Setup
+
+```powershell
+# Activate Python virtual environment
+.\venv\Scripts\Activate.ps1
+
+# Install project dependencies
+pip install -r backend/requirements.txt
+pip install jinja2 uvicorn streamlit plotly pytest httpx
+```
+
+### 2. Run Automated Integration Tests
+
+```powershell
+python -m pytest tests/test_pipeline.py -v
+```
+
+### 3. Launch Services
+
+#### FastAPI Service & Embedded Dashboard
+```powershell
+python -m uvicorn backend.api:app --reload --port 8000
+```
+- **Web Dashboard:** `http://127.0.0.1:8000/`
+- **Interactive OpenAPI Documentation:** `http://127.0.0.1:8000/docs`
+- **Health Diagnostics:** `http://127.0.0.1:8000/health`
+
+#### Streamlit Analytical UI
+```powershell
+streamlit run dashboard/app.py --server.port 8501
+```
+- **Interactive UI:** `http://localhost:8501/`
+
+---
+
+## API Contract Specification
+
+### Request (`POST /api/optimize`)
+```json
+{
+  "budget": 10000.0,
+  "cost_per_contact": 1.50,
+  "channel_filter": "All"
+}
+```
+
+### Response (`200 OK`)
+```json
+{
+  "status": "SUCCESS",
+  "total_customers_evaluated": 64000,
+  "targeted_customers_count": 6666,
+  "budget_allocated": 9999.0,
+  "total_expected_incremental_conversions": 528.7,
+  "efficiency_gain_vs_random": 1.30,
+  "decile_uplift_distribution": [0.124, 0.098, 0.081, 0.067, 0.052, 0.040, 0.031, 0.018, 0.004, -0.006]
+}
+```
